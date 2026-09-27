@@ -1063,7 +1063,7 @@ function phimTruongSon(){
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>
 /* ===== Phòng xét nghiệm — tuyến 2a ===== */
-var XN = { R:null, D:null, tep:[], mo:false };
+var XN = { R:null, D:null, tho:null, tep:[], mo:false };
 var XN_CH = store('xn') || { chon:['XN-VD-01','XN-VD-02','XN-VD-03'], nganh:'khac', ten:'' };
 var XNM = {}; DL.xet_nghiem.forEach(function(x){ XNM[x.ma]=x; });
 var CSM = {}; DL.chi_so.forEach(function(c){ CSM[c.ma]=c; });
@@ -1158,17 +1158,19 @@ function nhanTep(files){
   if (!files || !files.length) return;
   if (typeof XLSX==='undefined'){ $('#tepKQ').innerHTML='<div class="note red">Chưa tải được thư viện đọc Excel (cần mạng lần đầu). Tải lại trang rồi thử lại.</div>'; return; }
   $('#tepKQ').innerHTML='<div class="note info">Đang đọc và tính…</div>';
-  var tho = {}, ten = [];
-  var docMot = function(f){ return new Promise(function(res){ var r=new FileReader(); r.onload=function(e){ try{ var wb=XLSX.read(e.target.result,{type:'array',cellDates:true}); tho = MXN.gopSo(tho, MXN.docSo(wb, XLSX)); ten.push(f.name); }catch(err){ ten.push(f.name+' (không đọc được)'); } res(); }; r.readAsArrayBuffer(f); }); };
+  /* mỗi lần kéo là thêm mẫu vào sổ đang có (kéo từng phiếu 2a1, 2a2… cũng được); "Nộp lại từ đầu" để xoá */
+  var tho = XN.tho || {}, ten = XN.tep || [];
+  var docMot = function(f){ return new Promise(function(res){ var r=new FileReader(); r.onload=function(e){ try{ var wb=XLSX.read(e.target.result,{type:'array',cellDates:true}); tho = MXN.gopSo(tho, MXN.docSo(wb, XLSX)); if (ten.indexOf(f.name)<0) ten.push(f.name); }catch(err){ ten.push(f.name+' (không đọc được)'); } res(); }; r.readAsArrayBuffer(f); }); };
   var ps=[]; for (var i=0;i<files.length;i++) ps.push(docMot(files[i]));
   Promise.all(ps).then(function(){
-    var D = MXN.chuanHoa(tho, DL.schema); XN.D=D; XN.tep=ten;
+    var D = MXN.chuanHoa(tho, DL.schema); XN.D=D; XN.tho=tho; XN.tep=ten;
     var thieuBB = DL.gia_xn.bat_buoc.map(function(m){return XNM[m];}).filter(function(x){ return x.bang_ds.some(function(b){ return !D._co[b]; }); });
-    if (thieuBB.length){ XN.R=null; $('#tepKQ').innerHTML='<div class="note red"><b>Thiếu trang bắt buộc.</b> Sổ đã đọc: '+(Object.keys(D._co).join(', ')||'không có trang nào đúng tên')+'. Ba xét nghiệm nền cần đủ: '+thieuBB.map(function(x){return '<code>'+esc(x.bang)+'</code>';}).join(', ')+'. Kiểm tra tên sheet đúng chữ hoa chữ thường rồi kéo lại.</div>'; return; }
+    if (thieuBB.length){ XN.R=null; var coRoi = MXN.BANG.filter(function(b){return D._co[b];}); $('#tepKQ').innerHTML='<div class="card"><div class="eyebrow">Đã nhận '+ten.length+' tệp</div><p class="small" style="margin:6px 0 8px">'+(coRoi.length? coRoi.map(function(b){ return '<span class="tag">'+b+' · '+D._dong[b].toLocaleString('vi-VN')+' dòng</span>'; }).join(' ') : '<span class="muted">không có trang nào đúng tên</span>')+'</p><div class="note"><b>Còn thiếu mẫu cho xét nghiệm nền:</b> '+thieuBB.map(function(x){return esc(x.ten)+' (<code>'+esc(x.bang)+'</code>)';}).join(', ')+'. Kéo tiếp tệp có trang đó vào — sổ đang có được giữ nguyên. Tên sheet phải đúng chữ hoa chữ thường.</div><p class="no-print" style="margin:10px 0 0"><button class="btn g sm" type="button" onclick="nopLai()">Nộp lại từ đầu</button></p></div>'; return; }
     var R = MXN.tinh(D, { nganh: nganhCua(XN_CH.nganh), tham_so: DL.tham_so, danhmuc: DL.schema.danhmuc }); if (R.loi){ $('#tepKQ').innerHTML='<div class="note red">'+esc(R.loi)+'</div>'; return; }
     XN.R=R; XN.mo = !!(store('xn_mo') && store('xn_mo').luc && Date.now()-store('xn_mo').luc < 36e5*24); veTrangThaiTep();
   });
 }
+function nopLai(){ XN.tho=null; XN.D=null; XN.R=null; XN.tep=[]; var el=$('#tepKQ'); if (el) el.innerHTML=''; toast('Đã xoá sổ đã nộp'); }
 function veTrangThaiTep(){
   var D=XN.D, R=XN.R; var el=$('#tepKQ'); if(!el||!R) return;
   var chonCo = XN_CH.chon.filter(function(m){ return (XNM[m].bang_ds||[]).every(function(b){ return D._co[b]; }); }), chonThieu = XN_CH.chon.filter(function(m){ return chonCo.indexOf(m)<0 && m!=='XN-VD-11'; });
@@ -1181,6 +1183,7 @@ function veTrangThaiTep(){
     (chonThieu.length? '<div class="note" style="margin-bottom:10px">Đã chọn nhưng sổ thiếu trang nên chưa tính được: '+chonThieu.map(function(m){return esc(XNM[m].ten)+' (<code>'+esc(XNM[m].bang)+'</code>)';}).join(', ')+'. Bổ sung tệp hoặc bỏ chọn — phí chỉ tính cho xét nghiệm làm được.</div>':'')+
     '<div class="ok-cell"><div><b>'+fmtVN(diem,1)+'/100</b>Điểm sức khoẻ dữ liệu'+(du?'':' — <span style="color:var(--red)">dưới 50: dừng, chưa thu tiền</span>')+'</div><div><b>'+chonCo.length+'</b>xét nghiệm tính được · phí <b style="font-size:16px">'+vnd(tinhGia(chonCo))+'</b></div><div><b>'+nNgoai+'<span style="font-size:13px;color:var(--ink-3)">/'+nCo+'</span> · '+soDau+'</b>chỉ số ngoài ngưỡng · dấu hiệu bật'+(nang&&BENH[nang]?' — nặng nhất: <b style="font-size:14px;color:var(--ink)">'+esc(BENH[nang].ten)+'</b> ('+TEN_DEN[R.den[nang]].toLowerCase()+')':'')+'</div></div>'+
     (du? (XN.mo? '<div style="margin-top:14px"><a class="btn p" href="#/xet-nghiem/ket-qua">Xem phiếu kết quả</a></div>' : '<div style="margin-top:14px" class="no-print">'+khoaHtml(chonCo)+'</div>') : '<div class="note red" style="margin-top:12px"><b>Dữ liệu chưa đủ sạch để xét nghiệm.</b> Việc cần sửa trước: '+viecSua(R).join('; ')+'. Sửa xong kéo lại tệp — không mất phí.</div>')+'</div>';
+  html = html.slice(0, -6) + '<p class="no-print" style="margin:12px 0 0"><button class="btn g sm" type="button" onclick="nopLai()">Nộp lại từ đầu</button> <span class="tiny muted">Kéo thêm tệp sẽ gộp vào sổ đang có; mỗi xét nghiệm có thể nộp một tệp riêng.</span></p></div>';
   el.innerHTML = html; if (du && !XN.mo) gan();
   function gan(){ var b=$('#nhapMa'); if(!b) return; b.addEventListener('click', function(){ kiemMa($('#maKH').value, chonCo); }); $('#maKH').addEventListener('keydown', function(e){ if(e.key==='Enter'){ e.preventDefault(); kiemMa($('#maKH').value, chonCo); } }); }
 }
